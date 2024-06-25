@@ -1,0 +1,116 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.datasets import fetch_openml
+
+# Load MNIST dataset
+mnist = fetch_openml('mnist_784', version=1, as_frame=False)
+
+# Extract features and target
+X, y = mnist.data / 255.0, mnist.target.astype('int')
+
+# Split data into training and testing sets
+num_train = 60000
+X_train, X_test = X[:num_train], X[num_train:]
+y_train, y_test = y[:num_train], y[num_train:]
+
+# Visualize Examples
+num_classes = 10
+fig, ax = plt.subplots(1, num_classes, figsize=(20,20))
+for i in range(num_classes):
+    sample = X_train[y_train == i][0].reshape(28, 28)
+    ax[i].imshow(sample, cmap='gray')
+    ax[i].set_title("Label: {}".format(i), fontsize=16)
+plt.show()
+
+# One-hot encode labels
+encoder = OneHotEncoder(categories='auto')
+y_train_onehot = encoder.fit_transform(y_train.reshape(-1, 1)).toarray()
+y_test_onehot = encoder.transform(y_test.reshape(-1, 1)).toarray()
+
+# Define neural network architecture
+class NeuralNetwork:
+    def __init__(self, input_size, hidden_size, output_size):
+        self.weights1 = np.random.randn(input_size, hidden_size)
+        self.bias1 = np.zeros((1, hidden_size))
+        self.weights2 = np.random.randn(hidden_size, output_size)
+        self.bias2 = np.zeros((1, output_size))
+    
+    def forward(self, X):
+        self.hidden_output = np.dot(X, self.weights1) + self.bias1
+        self.hidden_activation = np.maximum(self.hidden_output, 0)  # ReLU activation
+        self.output = np.dot(self.hidden_activation, self.weights2) + self.bias2
+        self.output_probs = self.softmax(self.output)
+        return self.output_probs
+    
+    def softmax(self, X):
+        exp_values = np.exp(X - np.max(X, axis=1, keepdims=True))
+        return exp_values / np.sum(exp_values, axis=1, keepdims=True)
+    
+    def backward(self, X, y, learning_rate):
+        num_examples = X.shape[0]
+        
+        # Compute gradients
+        d_output = self.output_probs - y
+        d_weights2 = np.dot(self.hidden_activation.T, d_output) / num_examples
+        d_bias2 = np.sum(d_output, axis=0, keepdims=True) / num_examples
+        d_hidden = np.dot(d_output, self.weights2.T)
+        d_hidden[self.hidden_activation <= 0] = 0  # Backprop through ReLU
+        d_weights1 = np.dot(X.T, d_hidden) / num_examples
+        d_bias1 = np.sum(d_hidden, axis=0, keepdims=True) / num_examples
+        
+        # Update weights and biases
+        self.weights2 -= learning_rate * d_weights2
+        self.bias2 -= learning_rate * d_bias2
+        self.weights1 -= learning_rate * d_weights1
+        self.bias1 -= learning_rate * d_bias1
+    
+    def train(self, X, y, learning_rate, epochs, batch_size):
+        num_examples = X.shape[0]
+        for epoch in range(epochs):
+            for i in range(0, num_examples, batch_size):
+                X_batch = X[i:i+batch_size]
+                y_batch = y[i:i+batch_size]
+                output = self.forward(X_batch)
+                self.backward(X_batch, y_batch, learning_rate)
+            print("Epoch {}: Accuracy = {:.2f}%".format(epoch+1, self.evaluate(X, y) * 100))
+    
+    def evaluate(self, X, y):
+        predicted_probs = self.forward(X)
+        predicted_labels = np.argmax(predicted_probs, axis=1)
+        true_labels = np.argmax(y, axis=1)
+        accuracy = np.mean(predicted_labels == true_labels)
+        return accuracy
+
+# Prepare data
+input_size = X_train.shape[1]
+hidden_size = 128
+output_size = 10
+
+# Instantiate neural network
+nn = NeuralNetwork(input_size, hidden_size, output_size)
+
+# Train the neural network
+learning_rate = 0.1
+epochs = 10
+batch_size = 128
+nn.train(X_train, y_train_onehot, learning_rate, epochs, batch_size)
+
+# Evaluate on test data
+test_accuracy = nn.evaluate(X_test, y_test_onehot)
+print("Test Accuracy: {:.2f}%".format(test_accuracy * 100))
+
+# Predictions on test set
+predicted_probs = nn.forward(X_test)
+predicted_labels = np.argmax(predicted_probs, axis=1)
+
+# Confusion matrix
+conf_matrix = confusion_matrix(y_test, predicted_labels)
+plt.figure(figsize=(10, 8))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', cbar=False)
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.title('Confusion Matrix')
+plt.show()
